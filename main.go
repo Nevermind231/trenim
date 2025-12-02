@@ -2,49 +2,63 @@ package main
 
 import (
 	"fmt"
-	"math"
+	"math/rand"
 	"time"
 )
 
-const IMTpower = 2
+type User struct {
+	Name         string
+	userNumber   int
+	Try          int
+	Limit        int
+	randomNumber int
+}
 
 func main() {
-	fmt.Println("---Калькулятор индекса массы тела---")
-	userKg, userHeight := getUserInput()
-	IMT := calculateIMT(userKg, userHeight)
-	outputResult(IMT)
-	fmt.Println("")
 
-	if IMT > 26 {
-		fmt.Println("Худей жирнич")
+	var name string
+	fmt.Println("Введите ваше Имя:")
+	fmt.Scanln(&name)
+
+	user := User{
+		Name: name,
 	}
-	if IMT >= 18 {
-		fmt.Println("Нормальный сухарь")
-	} else {
-		fmt.Println("Тебе бы похавать")
+	user.startGame()
+	fmt.Println("Твоя профиль:", user.Name)
+	fmt.Println("Количество потраченных попыток:", user.Try)
+}
+func (u *User) genRandomNumber() {
+	rand.Seed(time.Now().UnixNano())
+	u.randomNumber = rand.Intn(10) + 1
+}
+
+func (u *User) startGame() {
+	u.Limit = 5
+	u.Try = 0
+	u.genRandomNumber()
+
+	fmt.Println("Угадай число от 1 до 10")
+	for u.Try < u.Limit {
+		fmt.Println("Введите ваше число")
+		fmt.Scanln(&u.userNumber)
+		if u.userNumber < 1 || u.userNumber > 10 {
+			fmt.Println("Ошибка ввода. Число должно быть от 1 до 10")
+			continue
+		}
+		u.Try++
+		if u.userNumber < u.randomNumber {
+			fmt.Println("Бери повыше")
+		} else if u.userNumber > u.randomNumber {
+			fmt.Println("Маленько меньше")
+		} else {
+			fmt.Println("Красавчик ты угадал")
+			return
+		}
+		if u.Try < u.Limit {
+			fmt.Printf(" осталось %d попыток. \n", u.Limit-u.Try)
+		} else {
+			fmt.Printf("У тебя кончились попытки,загаданное число было %d\n", u.randomNumber)
+
+		}
 	}
-
-	time.Sleep(5 * time.Second)
-
-}
-
-func outputResult(IMT float64) {
-	result := fmt.Sprintf("Ваш индекс массы тела %.0f", IMT)
-	fmt.Print(result)
-
-}
-
-func calculateIMT(userKg, userHeight float64) float64 {
-	IMT := userKg / math.Pow(userHeight/100, IMTpower)
-	return IMT
-}
-
-func getUserInput() (float64, float64) {
-	var userHeight float64
-	var userKg float64
-	fmt.Print("Введите свой вес")
-	fmt.Scan(&userKg)
-	fmt.Print("Введите свой рост в сантиметрах")
-	fmt.Scan(&userHeight)
-	return userKg, userHeight
 }
