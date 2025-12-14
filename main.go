@@ -7,108 +7,131 @@ import (
 	"time"
 )
 
-type Records struct {
+type Record struct {
 	Name        string
 	Try         int
 	UserNumbers []int
 	Success     int
 }
-type User struct {
-	UserNumber   int
-	Limit        int
+type Game struct {
+	Guess        int
 	randomNumber int
 	Try          int
 }
 
+const MaxAttempts = 5
+const RecordFile = "records.txt"
+
 func main() {
 
-	var records Records
-	var name string
-	fmt.Println("Введите ваше Имя:")
-	fmt.Scanln(&name)
-	records.Name = name
-	user := User{
-
-		Limit: 5,
-		Try:   0,
+	var records Record
+	user := Game{
+		Try: 0,
 	}
 
-	records.UserNumbers = []int{}
+	user.playGame(&records)
 
-	user.startGame(&records)
-
-	saveToFile(records, user)
+	if err := saveToFile(records, user); err != nil {
+		fmt.Println("Ошибка сохранения:", err)
+	} else {
+		fmt.Println("Ваш рекорд сохранён.")
+	}
 }
-func (u *User) genRandomNumber() {
+func (u *Game) genRandomNumber() {
 	rand.Seed(time.Now().UnixNano())
 	u.randomNumber = rand.Intn(10) + 1
 }
 
-func (u *User) startGame(records *Records) {
-	u.Limit = 5
-	u.Try = 0
+func initGame(u *Game, records *Record) {
 	u.genRandomNumber()
+	u.Try = 0
+	records.UserNumbers = []int{}
+	records.Success = 0
+
+}
+
+func (u *Game) playGame(records *Record) {
+
+	fmt.Println("Введите ваше Имя:")
+	fmt.Scanln(&records.Name)
+
+	initGame(u, records)
 
 	fmt.Println("Угадай число от 1 до 10")
-	for u.Try < u.Limit {
-		fmt.Println("Введите ваше число")
-		fmt.Scanln(&u.UserNumber)
-		if u.UserNumber < 1 || u.UserNumber > 10 {
-			fmt.Println("Ошибка ввода. Число должно быть от 1 до 10")
+	for u.Try < MaxAttempts {
+		guess, err := readNumber(1, 10)
+		if err != nil {
+			fmt.Println("Ошибка ввода:", err)
 			continue
 		}
-		u.Try++
-		records.UserNumbers = append(records.UserNumbers, u.UserNumber)
 
-		if u.UserNumber < u.randomNumber {
-			fmt.Println("Бери повыше")
-		} else if u.UserNumber > u.randomNumber {
-			fmt.Println("Маленько меньше")
-		} else {
-			fmt.Println("Красавчик ты угадал")
-			records.Success = u.Try
-			return
-		}
-		if u.Try < u.Limit {
-			fmt.Printf(" осталось %d попыток. \n", u.Limit-u.Try)
+		u.Guess = guess
+		u.Try++
+		records.UserNumbers = append(records.UserNumbers, u.Guess)
+
+		if u.Try < MaxAttempts {
+			fmt.Printf(" осталось %d попыток. \n", MaxAttempts-u.Try)
+			if u.Guess < u.randomNumber {
+				fmt.Println("Бери повыше")
+			} else if u.Guess > u.randomNumber {
+				fmt.Println("Маленько меньше")
+			} else {
+				fmt.Println("Красавчик ты угадал")
+				records.Success = u.Try
+				return
+			}
+
 		} else {
 			fmt.Printf("У тебя кончились попытки,загаданное число было %d\n", u.randomNumber)
 
 		}
 	}
 }
-func saveToFile(records Records, u User) {
+func readNumber(min, max int) (int, error) {
+	var num int
+
+	_, err := fmt.Scanln(&num)
+	if err != nil {
+		var diskard string
+		fmt.Scanln(&diskard)
+		return 0, fmt.Errorf("нужно ввести число")
+	}
+
+	if num < min || num > max {
+		return 0, fmt.Errorf("число должно быть от %d до %d", min, max)
+	}
+
+	return num, nil
+}
+
+func saveToFile(records Record, u Game) error {
 	file, err := os.OpenFile("records.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("Ошибка при открытии файла:", err)
-		return
+		return fmt.Errorf("open file: %w", err)
+
 	}
+
 	defer file.Close()
+
 	_, err = fmt.Fprintf(file, "Имя: %s Числа: ", records.Name)
 	if err != nil {
-		fmt.Println("Ошибка при записи имени и чисел в файл:", err)
-		return
+		return fmt.Errorf("write name: %w", err)
 	}
+
 	for _, num := range records.UserNumbers {
 		_, err := fmt.Fprintf(file, "%d ", num)
 		if err != nil {
-			fmt.Println("Ошибка при записи числа в файл:", err)
-			return
+			return fmt.Errorf("write number: %w", err)
 		}
 	}
+
 	if records.Success > 0 {
 		_, err = fmt.Fprintf(file, "Угадал на попытке: %d Загаданное число: %d\n", records.Success, u.randomNumber)
-		if err != nil {
-			fmt.Println("Ошибка при записи в файл:", err)
-			return
-		}
 	} else {
 		_, err = fmt.Fprintf(file, "Не угадал число за %d попыток. Загаданное число: %d\n", len(records.UserNumbers), u.randomNumber)
 		if err != nil {
-			fmt.Println("Ошибка при записи в файл:", err)
-			return
+			return fmt.Errorf("write result: %w", err)
 		}
 	}
-	fmt.Println("Ваш рекорд сохранён.")
-
+	return nil
 }
