@@ -1,137 +1,127 @@
 package main
 
 import (
-	"fmt"
-	"math/rand"
-	"os"
-	"time"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
 )
 
-type Record struct {
-	Name        string
-	Try         int
-	UserNumbers []int
-	Success     int
-}
-type Game struct {
-	Guess        int
-	randomNumber int
-	Try          int
+type Task struct {
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	Completed bool   `json:"completed"`
 }
 
-const MaxAttempts = 5
-const RecordFile = "records.txt"
+var tasks = make(map[int]Task)
+var nextID = 1
+var mu sync.Mutex
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{
+		"error": msg,
+	})
+}
+
+func tasksHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+
+	case http.MethodGet:
+		mu.Lock()
+		list := make([]Task, 0, len(tasks))
+		for _, task := range tasks {
+			list = append(list, task)
+		}
+		mu.Unlock()
+		writeJSON(w, http.StatusOK, list)
+
+	case http.MethodPost:
+		var input struct {
+			Title string `json:"title"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		mu.Lock()
+		task := Task{
+			ID:        nextID,
+			Title:     input.Title,
+			Completed: false,
+		}
+		tasks[nextID] = task
+		nextID++
+		mu.Unlock()
+
+		writeJSON(w, http.StatusCreated, task)
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func taskHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/tasks/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	mu.Lock()
+	task, ok := tasks[id]
+	mu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	switch r.Method {
+
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, task)
+
+	case http.MethodPut:
+		var input struct {
+			Completed bool `json:"completed"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		mu.Lock()
+		task.Completed = input.Completed
+		tasks[id] = task
+		mu.Unlock()
+
+		writeJSON(w, http.StatusOK, task)
+
+	case http.MethodDelete:
+		mu.Lock()
+		delete(tasks, id)
+		mu.Unlock()
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "deleted",
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
 
 func main() {
+	http.HandleFunc("/tasks", tasksHandler)
+	http.HandleFunc("/tasks/", taskHandler)
 
-	var records Record
-	user := Game{
-		Try: 0,
-	}
-
-	user.playGame(&records)
-
-	if err := saveToFile(records, user); err != nil {
-		fmt.Println("Ошибка сохранения:", err)
-	} else {
-		fmt.Println("Ваш рекорд сохранён.")
-	}
-}
-func (u *Game) genRandomNumber() {
-	rand.Seed(time.Now().UnixNano())
-	u.randomNumber = rand.Intn(10) + 1
-}
-
-func initGame(u *Game, records *Record) {
-	u.genRandomNumber()
-	u.Try = 0
-	records.UserNumbers = []int{}
-	records.Success = 0
-
-}
-
-func (u *Game) playGame(records *Record) {
-
-	fmt.Println("Введите ваше Имя:")
-	fmt.Scanln(&records.Name)
-
-	initGame(u, records)
-
-	fmt.Println("Угадай число от 1 до 10")
-	for u.Try < MaxAttempts {
-		guess, err := readNumber(1, 10)
-		if err != nil {
-			fmt.Println("Ошибка ввода:", err)
-			continue
-		}
-
-		u.Guess = guess
-		u.Try++
-		records.UserNumbers = append(records.UserNumbers, u.Guess)
-
-		if u.Try < MaxAttempts {
-			fmt.Printf(" осталось %d попыток. \n", MaxAttempts-u.Try)
-			if u.Guess < u.randomNumber {
-				fmt.Println("Бери повыше")
-			} else if u.Guess > u.randomNumber {
-				fmt.Println("Маленько меньше")
-			} else {
-				fmt.Println("Красавчик ты угадал")
-				records.Success = u.Try
-				return
-			}
-
-		} else {
-			fmt.Printf("У тебя кончились попытки,загаданное число было %d\n", u.randomNumber)
-
-		}
-	}
-}
-func readNumber(min, max int) (int, error) {
-	var num int
-
-	_, err := fmt.Scanln(&num)
-	if err != nil {
-		var diskard string
-		fmt.Scanln(&diskard)
-		return 0, fmt.Errorf("нужно ввести число")
-	}
-
-	if num < min || num > max {
-		return 0, fmt.Errorf("число должно быть от %d до %d", min, max)
-	}
-
-	return num, nil
-}
-
-func saveToFile(records Record, u Game) error {
-	file, err := os.OpenFile("records.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-
-	}
-
-	defer file.Close()
-
-	_, err = fmt.Fprintf(file, "Имя: %s Числа: ", records.Name)
-	if err != nil {
-		return fmt.Errorf("write name: %w", err)
-	}
-
-	for _, num := range records.UserNumbers {
-		_, err := fmt.Fprintf(file, "%d ", num)
-		if err != nil {
-			return fmt.Errorf("write number: %w", err)
-		}
-	}
-
-	if records.Success > 0 {
-		_, err = fmt.Fprintf(file, "Угадал на попытке: %d Загаданное число: %d\n", records.Success, u.randomNumber)
-	} else {
-		_, err = fmt.Fprintf(file, "Не угадал число за %d попыток. Загаданное число: %d\n", len(records.UserNumbers), u.randomNumber)
-		if err != nil {
-			return fmt.Errorf("write result: %w", err)
-		}
-	}
-	return nil
+	http.ListenAndServe(":8080", nil)
 }
